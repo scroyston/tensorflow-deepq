@@ -10,6 +10,7 @@ class ContinuousDeepQ(object):
                        actor,
                        critic,
                        optimizer,
+                       critic_optimizer,
                        session,
                        exploration_sigma=0.05,
                        exploration_period=1000,
@@ -87,6 +88,7 @@ class ContinuousDeepQ(object):
         self.actor                     = actor
         self.critic                    = critic
         self.optimizer                 = optimizer
+        self.critic_optimizer          = critic_optimizer
         self.s                         = session
 
         self.exploration_sigma         = exploration_sigma
@@ -171,20 +173,24 @@ class ContinuousDeepQ(object):
             tf.scalar_summary("critic_error", self.critic_error)
 
         with tf.name_scope("actor_update"):
-            ##### ERROR FUNCTION #####
-            self.actor_score = self.critic([self.observation, self.actor_action])
+            with tf.control_dependencies([self.critic_update]):
+                ##### ERROR FUNCTION #####
+                self.actor_score = self.critic([self.observation, self.actor_action])
 
             ##### OPTIMIZATION #####
             # here we are maximizing actor score.
             # only optimize actor variables here, while keeping critic constant
-            actor_gradients = self.optimizer.compute_gradients(tf.reduce_mean(-self.actor_score), var_list=self.actor.variables())
+            with tf.control_dependencies([self.actor_score]):
+                actor_gradients = self.optimizer.compute_gradients(tf.reduce_mean(-self.actor_score), var_list=self.critic.variables() + self.actor.variables())
+                #actor_gradients = self.critic_optimizer.compute_gradients(tf.fill(tf.shape(self.actor_score), -1.0), var_list=self.critic.variables() + self.actor.variables())
+
             # Add histograms for gradients.
             for grad, var in actor_gradients:
                 tf.histogram_summary('actor_update/' + var.name, var)
                 if grad:
                     tf.histogram_summary('actor_update/' + var.name + '/gradients', grad)
-            self.actor_update              = self.optimizer.apply_gradients(actor_gradients)
-            tf.scalar_summary("actor_score", tf.reduce_mean(self.actor_score))
+            self.actor_update              = self.critic_optimizer.apply_gradients([ x for x in actor_gradients if x[1] in self.actor.variables()])
+            #tf.scalar_summary("actor_score", tf.reduce_mean(self.actor_score))
 
         # UPDATE TARGET NETWORK
         with tf.name_scope("target_network_update"):
@@ -227,6 +233,28 @@ class ContinuousDeepQ(object):
                 self.experience.popleft()
         self.number_of_times_store_called += 1
 
+    def run_learn(self, states, newstates, newstates_mask, actions, rewards):
+        _, _, summary_str = self.s.run([
+            self.actor_update,
+            self.critic_update,
+            self.summarize if self.iteration % 100 == 0 else self.no_op1,
+        ], {
+            self.observation:            states,
+            self.next_observation:       newstates,
+            self.next_observation_mask:  newstates_mask,
+            self.given_action:           actions,
+            self.rewards:                rewards,
+        })
+
+        self.s.run(self.update_all_targets)
+
+        if self.summary_writer is not None and summary_str is not None:
+            self.summary_writer.add_summary(summary_str, self.iteration)
+
+        self.iteration += 1
+
+        self.number_of_times_train_called += 1
+
     def training_step(self):
         """Pick a self.minibatch_size exeperiences from reply buffer
         and backpropage the value function.
@@ -258,23 +286,8 @@ class ContinuousDeepQ(object):
                     newstates[i] = 0
                     newstates_mask[i] = 0.
 
-            _, _, summary_str = self.s.run([
-                self.actor_update,
-                self.critic_update,
-                self.summarize if self.iteration % 100 == 0 else self.no_op1,
-            ], {
-                self.observation:            states,
-                self.next_observation:       newstates,
-                self.next_observation_mask:  newstates_mask,
-                self.given_action:           actions,
-                self.rewards:                rewards,
-            })
+            run_learn(states, newstates, newstates_mask, actions, rewards)
 
-            self.s.run(self.update_all_targets)
 
-            if self.summary_writer is not None and summary_str is not None:
-                self.summary_writer.add_summary(summary_str, self.iteration)
 
-            self.iteration += 1
 
-        self.number_of_times_train_called += 1
