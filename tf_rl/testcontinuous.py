@@ -10,7 +10,7 @@ class SimpleActorMLP(object):
         self.scope = scope
 
         with tf.variable_scope(self.scope):
-            W_initializer =  tf.random_uniform_initializer(-1.0 / math.sqrt(2), 1.0 / math.sqrt(2))
+            W_initializer =  tf.random_uniform_initializer(-0.003, 0.003) #-1.0 / math.sqrt(2), 1.0 / math.sqrt(2))
             self.W1_var = tf.get_variable("W_1", (1, 1), initializer=W_initializer)
             self.b1 = tf.get_variable("b_1",  (1,), initializer=tf.constant_initializer(0))
 
@@ -31,7 +31,7 @@ class SimpleCriticMLP(object):
         self.scope = scope
 
         with tf.variable_scope(self.scope):
-            W_initializer =  tf.random_uniform_initializer(-1.0 / math.sqrt(2), 1.0 / math.sqrt(2))
+            W_initializer =  tf.random_uniform_initializer(-0.003, 0.003) #-1.0 / math.sqrt(2), 1.0 / math.sqrt(2))
             self.W1_var = tf.get_variable("W_1", (2, 1), initializer=W_initializer)
             self.b1 = tf.get_variable("b_1",  (1,), initializer=tf.constant_initializer(0))
 
@@ -91,26 +91,8 @@ def learnCritic():
         else:
             foo = session.run(train, feed_dict=feed)
 
-
-def do_rl():
-    tf.reset_default_graph()
-    session = tf.InteractiveSession()
-
-    critic = SimpleCriticMLP("critic")
-    actor = SimpleActorMLP("actor")
-
-    optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001, decay=0.9)
-    critic_optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001, decay=0.9)
-
-    timestr = time.strftime("-%H%M%S")
-    writer = tf.train.SummaryWriter("/tmp/test_tb_logs/run" + timestr)
-
-    contDeepQ = ContinuousDeepQ(1, 1, actor, critic, optimizer, critic_optimizer, session, summary_writer=writer)
-
-    session.run(tf.initialize_all_variables())
-    writer.add_graph(session.graph_def)
-
-            # bach states
+def one_step(contDeepQ):
+     # bach states
     states         = np.empty((1, 1))
     newstates      = np.empty((1, 1))
     actions        = np.zeros((1, 1))
@@ -126,21 +108,43 @@ def do_rl():
 
     contDeepQ.run_learn(states, newstates, newstates_mask, actions, rewards)
 
-    # last_observation = None
-    # last_action = None
-    # reward = 0.0
-    # new_observation = None
-    #
-    # for i in range(1000000):
-    #     new_observation = np.random.rand(1)  # Random input
-    #     if last_observation is not None:
-    #         contDeepQ.store(last_observation, last_action, reward, new_observation)
-    #
-    #     new_action = contDeepQ.action(new_observation)
-    #     reward = -math.pow(3.7 * new_observation[0] - new_action, 2)
-    #     contDeepQ.training_step()
-    #     last_observation = new_observation
-    #     last_action = new_action
+
+def do_rl():
+    tf.reset_default_graph()
+    session = tf.InteractiveSession()
+
+    critic = SimpleCriticMLP("critic")
+    actor = SimpleActorMLP("actor")
+
+    optimizer = tf.train.RMSPropOptimizer(learning_rate=0.0001, decay=0.9)
+    critic_optimizer = tf.train.RMSPropOptimizer(learning_rate=0.0001, decay=0.9)
+
+    timestr = time.strftime("-%H%M%S")
+    writer = tf.train.SummaryWriter("/tmp/test_tb_logs/run" + timestr)
+
+    contDeepQ = ContinuousDeepQ(1, 1, actor, critic, optimizer, critic_optimizer, session, summary_writer=writer)
+
+    session.run(tf.initialize_all_variables())
+    contDeepQ.startup()
+
+    writer.add_graph(session.graph_def)
+    #one_step(contDeepQ)
+
+    last_observation = None
+    last_action = None
+    reward = 0.0
+    new_observation = None
+
+    for i in range(1000000):
+        new_observation = np.random.rand(1)  # Random input
+        if last_observation is not None:
+            contDeepQ.store(last_observation, last_action, reward, new_observation)
+
+        new_action = contDeepQ.action(new_observation)
+        reward = -math.pow(3.7 * new_observation[0] - new_action, 2)
+        contDeepQ.training_step()
+        last_observation = new_observation
+        last_action = new_action
 
 
 if __name__ == '__main__':

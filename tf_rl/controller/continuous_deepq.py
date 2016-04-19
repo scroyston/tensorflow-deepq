@@ -134,9 +134,20 @@ class ContinuousDeepQ(object):
             target_network_update.append(update_op)
         return tf.group(*target_network_update)
 
+
+    def copy_vars(self, mdl, target_mdl):
+        init_targets = []
+        for x,y in zip(target_mdl.variables(), mdl.variables()):
+            init_targets.append(x.assign(y))
+        return tf.group(*init_targets)
+
+
     def create_variables(self):
         self.target_actor  = self.actor.copy(scope="target_actor")
         self.target_critic = self.critic.copy(scope="target_critic")
+        self.init_target_actor = self.copy_vars(self.actor, self.target_actor)
+        self.init_target_critic = self.copy_vars(self.critic, self.target_critic)
+        self.init_targets = tf.group(self.init_target_actor, self.init_target_critic)
 
         # FOR REGULAR ACTION SCORE COMPUTATION
         with tf.name_scope("taking_action"):
@@ -181,7 +192,7 @@ class ContinuousDeepQ(object):
             # here we are maximizing actor score.
             # only optimize actor variables here, while keeping critic constant
             with tf.control_dependencies([self.actor_score]):
-                actor_gradients = self.optimizer.compute_gradients(tf.reduce_mean(-self.actor_score), var_list=self.critic.variables() + self.actor.variables())
+                actor_gradients = self.critic_optimizer.compute_gradients(tf.reduce_mean(-self.actor_score), var_list=self.critic.variables() + self.actor.variables())
                 #actor_gradients = self.critic_optimizer.compute_gradients(tf.fill(tf.shape(self.actor_score), -1.0), var_list=self.critic.variables() + self.actor.variables())
 
             # Add histograms for gradients.
@@ -200,6 +211,9 @@ class ContinuousDeepQ(object):
 
         self.summarize = tf.merge_all_summaries()
         self.no_op1 = tf.no_op()
+
+    def startup(self):
+        self.s.run(self.init_targets)
 
     def action(self, observation, disable_exploration=False):
         """Given observation returns the action that should be chosen using
@@ -234,6 +248,15 @@ class ContinuousDeepQ(object):
         self.number_of_times_store_called += 1
 
     def run_learn(self, states, newstates, newstates_mask, actions, rewards):
+        # print("actor:")
+        # print([x.eval() for x in self.actor.variables()], '\n')
+        # print("critic:")
+        # print([x.eval() for x in self.critic.variables()], '\n')
+        # print("target_actor:")
+        # print([x.eval() for x in self.target_actor.variables()], '\n')
+        # print("target_critic:")
+        # print([x.eval() for x in self.target_critic.variables()], '\n')
+
         _, _, summary_str = self.s.run([
             self.actor_update,
             self.critic_update,
@@ -253,7 +276,6 @@ class ContinuousDeepQ(object):
 
         self.iteration += 1
 
-        self.number_of_times_train_called += 1
 
     def training_step(self):
         """Pick a self.minibatch_size exeperiences from reply buffer
@@ -286,8 +308,10 @@ class ContinuousDeepQ(object):
                     newstates[i] = 0
                     newstates_mask[i] = 0.
 
-            run_learn(states, newstates, newstates_mask, actions, rewards)
+            self.run_learn(states, newstates, newstates_mask, actions, rewards)
 
+
+        self.number_of_times_train_called += 1
 
 
 
