@@ -13,14 +13,14 @@ class ContinuousDeepQ(object):
                        critic_optimizer,
                        session,
                        exploration_sigma=0.05,
-                       exploration_period=1000,
+                       exploration_period=1000000,
                        store_every_nth=5,
                        train_every_nth=5,
                        minibatch_size=32,
                        discount_rate=0.95,
                        max_experience=30000,
-                       target_actor_update_rate=0.01,
-                       target_critic_update_rate=0.01,
+                       target_actor_update_rate=0.001,
+                       target_critic_update_rate=0.001,
                        summary_writer=None):
         """Initialized the Deepq object.
 
@@ -141,6 +141,11 @@ class ContinuousDeepQ(object):
             init_targets.append(x.assign(y))
         return tf.group(*init_targets)
 
+    def names_for_var(self, var, prefix, suffix):
+        shp = var._variable._shape
+        length = shp.num_elements()
+        return tf.constant([prefix + str(x) + suffix for x in range(length)], shape=shp)
+
 
     def create_variables(self):
         self.target_actor  = self.actor.copy(scope="target_actor")
@@ -161,6 +166,7 @@ class ContinuousDeepQ(object):
             self.next_observation_mask     = tf.placeholder(tf.float32, (None,), name="next_observation_mask")
             self.next_action               = self.target_actor(self.next_observation) # ST
             tf.histogram_summary("target_actions", self.next_action)
+            #tf.scalar_summary(self.names_for_var("target_actions_", "", 1), self.next_action)
             self.next_value                = self.target_critic([self.next_observation, self.next_action]) # ST
             self.rewards                   = tf.placeholder(tf.float32, (None,), name="rewards")
             self.future_reward             = self.rewards + self.discount_rate *  self.next_observation_mask * self.next_value
@@ -169,6 +175,8 @@ class ContinuousDeepQ(object):
             ##### ERROR FUNCTION #####
             self.given_action               = tf.placeholder(tf.float32, (None, self.action_size), name="given_action")
             self.value_given_action         = self.critic([self.observation, self.given_action])
+            tf.scalar_summary("value_for_given_action_obs", tf.reduce_mean(self.observation))
+            tf.scalar_summary("value_for_given_action_act", tf.reduce_mean(self.given_action))
             tf.scalar_summary("value_for_given_action", tf.reduce_mean(self.value_given_action))
             temp_diff                       = self.value_given_action - self.future_reward
 
@@ -177,9 +185,12 @@ class ContinuousDeepQ(object):
             critic_gradients                       = self.optimizer.compute_gradients(self.critic_error, var_list=self.critic.variables())
             # Add histograms for gradients.
             for grad, var in critic_gradients:
-                tf.histogram_summary('critic_update/' + var.name, var)
+                #tf.histogram_summary('critic_update/' + var.name, var)
+                nms = self.names_for_var(var, "critic_update/"+var.name + "_", "")
+                tf.scalar_summary(nms, var)
                 if grad:
                     tf.histogram_summary('critic_update/' + var.name + '/gradients', grad)
+                    #tf.scalar_summary(self.names_for_var(grad, "critic_update/"+var.name + "_", "/gradients"), grad)
             self.critic_update              = self.optimizer.apply_gradients(critic_gradients)
             tf.scalar_summary("critic_error", self.critic_error)
 
@@ -197,17 +208,23 @@ class ContinuousDeepQ(object):
 
             # Add histograms for gradients.
             for grad, var in actor_gradients:
-                tf.histogram_summary('actor_update/' + var.name, var)
+                tf.histogram_summary('actor_update1/' + var.name, var)
+                tf.scalar_summary(self.names_for_var(var, "actor_update/"+var.name + "_", ""), var)
                 if grad:
+                    #tf.scalar_summary(self.names_for_var(grad, "actor_update/"+var.name + "_", "/gradients"), grad)
                     tf.histogram_summary('actor_update/' + var.name + '/gradients', grad)
             self.actor_update              = self.critic_optimizer.apply_gradients([ x for x in actor_gradients if x[1] in self.actor.variables()])
-            #tf.scalar_summary("actor_score", tf.reduce_mean(self.actor_score))
+            tf.scalar_summary("actor_score", tf.reduce_mean(self.actor_score))
 
         # UPDATE TARGET NETWORK
         with tf.name_scope("target_network_update"):
             self.target_actor_update  = ContinuousDeepQ.update_target_network(self.actor, self.target_actor, self.target_actor_update_rate)
             self.target_critic_update = ContinuousDeepQ.update_target_network(self.critic, self.target_critic, self.target_critic_update_rate)
             self.update_all_targets = tf.group(self.target_actor_update, self.target_critic_update)
+            for var in self.target_critic.variables():
+                tf.scalar_summary(self.names_for_var(var, "target_critic/"+var.name + "_", ""), var)
+            for var in self.target_actor.variables():
+                tf.scalar_summary(self.names_for_var(var, "target_actor/"+var.name + "_", ""), var)
 
         self.summarize = tf.merge_all_summaries()
         self.no_op1 = tf.no_op()
@@ -228,9 +245,9 @@ class ContinuousDeepQ(object):
                                                        self.exploration_sigma)
 
         action = self.s.run(self.actor_action, {self.observation: observation[np.newaxis,:]})[0]
-        if not disable_exploration:
+        if not disable_exploration and random.random() > 0.7:
             action += np.random.normal(0, noise_sigma, size=action.shape)
-            action = np.clip(action, -1., 1.)
+            #action = np.clip(action, -1., 1.)
 
         return action
 
@@ -260,7 +277,7 @@ class ContinuousDeepQ(object):
         _, _, summary_str = self.s.run([
             self.actor_update,
             self.critic_update,
-            self.summarize if self.iteration % 100 == 0 else self.no_op1,
+            self.summarize, #if self.iteration % 100 == 0 else self.no_op1,
         ], {
             self.observation:            states,
             self.next_observation:       newstates,

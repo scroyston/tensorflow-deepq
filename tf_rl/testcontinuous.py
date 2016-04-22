@@ -12,6 +12,7 @@ class SimpleActorMLP(object):
         with tf.variable_scope(self.scope):
             W_initializer =  tf.random_uniform_initializer(-0.003, 0.003) #-1.0 / math.sqrt(2), 1.0 / math.sqrt(2))
             self.W1_var = tf.get_variable("W_1", (1, 1), initializer=W_initializer)
+            #self.W1_var = tf.get_variable("W_1", initializer=tf.constant([[3.7]]))
             self.b1 = tf.get_variable("b_1",  (1,), initializer=tf.constant_initializer(0))
 
     def __call__(self, xs):
@@ -33,20 +34,24 @@ class SimpleCriticMLP(object):
         with tf.variable_scope(self.scope):
             W_initializer =  tf.random_uniform_initializer(-0.003, 0.003) #-1.0 / math.sqrt(2), 1.0 / math.sqrt(2))
             self.W1_var = tf.get_variable("W_1", (2, 1), initializer=W_initializer)
+            #self.W1_var = tf.get_variable("W_1", initializer=tf.constant([[3.7], [-1.0]]))#W_initializer)
             self.b1 = tf.get_variable("b_1",  (1,), initializer=tf.constant_initializer(0))
 
-            self.W2_var = tf.get_variable("W_2", (1, 1), initializer=W_initializer)
-            self.b2 = tf.get_variable("b_2",  (1,), initializer=tf.constant_initializer(0))
+            #self.W2_var = tf.get_variable("W_2", (1, 1), initializer=W_initializer)
+            #self.W2_var = tf.get_variable("W_2", initializer=tf.constant([[-1.0]]))
+            #self.b2 = tf.get_variable("b_2",  (1,), initializer=tf.constant_initializer(0))
 
 
     def __call__(self, xs):
         if type(xs) == list:
             xs = tf.concat(1, [xs[0], xs[1]])
         with tf.variable_scope(self.scope):
-            return tf.matmul(tf.square(tf.matmul(xs, self.W1_var) + self.b1, "squaring"), self.W2_var) + self.b2
+            return -tf.square(tf.matmul(xs, self.W1_var) + self.b1, "squaring")
+            #return tf.matmul(tf.square(tf.matmul(xs, self.W1_var) + self.b1, "squaring"), self.W2_var) + self.b2
 
     def variables(self):
-        return [self.W1_var, self.b1, self.W2_var, self.b2]
+        return [self.W1_var, self.b1]
+        #return [self.W1_var, self.b1, self.W2_var, self.b2]
 
     def copy(self, scope=None):
         scope = scope or self.scope + "_copy"
@@ -116,13 +121,15 @@ def do_rl():
     critic = SimpleCriticMLP("critic")
     actor = SimpleActorMLP("actor")
 
-    optimizer = tf.train.RMSPropOptimizer(learning_rate=0.0001, decay=0.9)
-    critic_optimizer = tf.train.RMSPropOptimizer(learning_rate=0.0001, decay=0.9)
+    optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001, decay=0.9)
+    #optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.0001)
+    critic_optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001, decay=0.9)
+    #critic_optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.0001)
 
     timestr = time.strftime("-%H%M%S")
     writer = tf.train.SummaryWriter("/tmp/test_tb_logs/run" + timestr)
 
-    contDeepQ = ContinuousDeepQ(1, 1, actor, critic, optimizer, critic_optimizer, session, summary_writer=writer)
+    contDeepQ = ContinuousDeepQ(1, 1, actor, critic, optimizer, critic_optimizer, session, store_every_nth=1, summary_writer=writer)
 
     session.run(tf.initialize_all_variables())
     contDeepQ.startup()
@@ -138,6 +145,7 @@ def do_rl():
     for i in range(1000000):
         new_observation = np.random.rand(1)  # Random input
         if last_observation is not None:
+            #contDeepQ.run_learn(states, newstates, newstates_mask, actions, rewards)
             contDeepQ.store(last_observation, last_action, reward, new_observation)
 
         new_action = contDeepQ.action(new_observation)
