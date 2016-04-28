@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import math
 import numpy as np
+import random
 import tensorflow as tf
 from tf_rl.controller import ContinuousDeepQ
 import time
@@ -118,13 +119,19 @@ def do_rl():
     tf.reset_default_graph()
     session = tf.InteractiveSession()
 
+    #seed_init = 123 #works
+    seed_init = 133
+    #seed_init = 125  # works!
+    random.seed(seed_init)
+    np.random.seed(seed_init)
+    tf.set_random_seed(seed_init)
     critic = SimpleCriticMLP("critic")
     actor = SimpleActorMLP("actor")
 
-    optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001, decay=0.9)
-    #optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.0001)
-    critic_optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001, decay=0.9)
-    #critic_optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.0001)
+    #optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001, decay=0.9)
+    optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.001)
+    #critic_optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001, decay=0.9)
+    critic_optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.001)
 
     timestr = time.strftime("-%H%M%S")
     writer = tf.train.SummaryWriter("/tmp/test_tb_logs/run" + timestr)
@@ -142,8 +149,9 @@ def do_rl():
     reward = 0.0
     new_observation = None
 
-    for i in range(1000000):
+    for i in range(10000):
         new_observation = np.random.rand(1)  # Random input
+        #new_observation = np.array([random.random()])
         if last_observation is not None:
             #contDeepQ.run_learn(states, newstates, newstates_mask, actions, rewards)
             contDeepQ.store(last_observation, last_action, reward, new_observation)
