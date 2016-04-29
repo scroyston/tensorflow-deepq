@@ -16,7 +16,7 @@ class ContinuousDeepQ(object):
                        exploration_period=1000000,
                        store_every_nth=1,
                        train_every_nth=1,
-                       minibatch_size=1,
+                       minibatch_size=2,
                        discount_rate=0.95,
                        max_experience=30000,
                        target_actor_update_rate=0.001,
@@ -155,11 +155,11 @@ class ContinuousDeepQ(object):
         self.init_targets = tf.group(self.init_target_actor, self.init_target_critic)
 
         with tf.name_scope("observation"):
-            self.observation  = tf.placeholder(tf.float32, (None, self.observation_size), name="observation")
-            self.given_action               = tf.placeholder(tf.float32, (None, self.action_size), name="given_action")
-            self.next_observation          = tf.placeholder(tf.float32, (None, self.observation_size), name="next_observation")
-            self.next_observation_mask     = tf.placeholder(tf.float32, (None,), name="next_observation_mask")
-            self.rewards                   = tf.placeholder(tf.float32, (None,), name="rewards")
+            self.observation  = tf.placeholder(tf.float32, [None, self.observation_size], name="observation")
+            self.given_action               = tf.placeholder(tf.float32, [None, self.action_size], name="given_action")
+            self.next_observation          = tf.placeholder(tf.float32, [None, self.observation_size], name="next_observation")
+            self.next_observation_mask     = tf.placeholder(tf.float32, [None,], name="next_observation_mask")
+            self.rewards                   = tf.placeholder(tf.float32, [None,], name="rewards")
             tf.scalar_summary("observation/s0", tf.reduce_mean(self.observation))
             tf.scalar_summary("observation/a0", tf.reduce_mean(self.given_action))
             tf.scalar_summary("observation/s1", tf.reduce_mean(self.next_observation))
@@ -187,15 +187,16 @@ class ContinuousDeepQ(object):
             tf.scalar_summary("critic_update/target_actor(s1)_a1", tf.reduce_mean(self.next_action))
             self.next_value                = self.target_critic([self.next_observation, self.next_action]) # ST
             tf.scalar_summary("critic_update/target_critic(a1)", tf.reduce_mean(self.next_value))
-            self.future_reward             = self.rewards + self.discount_rate *  self.next_observation_mask * self.next_value
+            #self.future_reward             = self.rewards + self.discount_rate *  self.next_observation_mask * self.next_value
+            self.future_reward             = tf.add_n(self.rewards, self.discount_rate * self.next_value)
             tf.scalar_summary("critic_update/r0disc_target_critic(a1)", tf.reduce_mean(self.next_value))
 
             ##### ERROR FUNCTION #####
             self.value_given_action         = self.critic([self.observation, self.given_action])
             tf.scalar_summary("critic_update/critic(s0,a0)", tf.reduce_mean(self.value_given_action))
-            temp_diff                       = self.value_given_action - self.future_reward
+            self.critic_diff                       = self.value_given_action - self.future_reward
 
-            self.critic_error               = tf.reduce_mean(tf.square(temp_diff))
+            self.critic_error               = tf.reduce_mean(tf.square(self.critic_diff))
             ##### OPTIMIZATION #####
             self.critic_gradients                       = self.optimizer.compute_gradients(self.critic_error, var_list=self.critic.variables(), gate_gradients=2)
             # Add histograms for gradients.
@@ -291,9 +292,9 @@ class ContinuousDeepQ(object):
             self.actor_update,
             self.summarize if self.iteration % 1000 == 0 else self.no_op1,
         ]
-        tofetch = tofetchp1 + gradfetch + self.critic.variables()
+        tofetch = tofetchp1 + gradfetch + self.critic.variables() + self.actor.variables() + self.target_critic.variables() + self.target_actor.variables() + [self.value_given_action, self.next_value, self.future_reward, self.critic_diff]
 
-        _, _, summary_str, g1, g2, cw, cb = self.s.run(tofetch, {
+        _, _, summary_str, g1, g2, cw, cb, aw, ab, tcw, tcb, taw, tab, q1a, nv, q1b, cdiff = self.s.run(tofetch, {
             self.observation:            states,
             self.next_observation:       newstates,
             self.next_observation_mask:  newstates_mask,
@@ -304,8 +305,17 @@ class ContinuousDeepQ(object):
         g2tmp = np.append(g1, g2)
         g3tmp = np.append(cw, cb)
         g3 = np.append(g2tmp, g3tmp)
+        foobar = list(map(np.ravel, [g1, g2, cw, cb, aw, ab, tcw, tcb, taw, tab]))
 
-        print(str(g3[0]) + " " + str(g3[1]) + " " + str(g3[2]) + " " + str(g3[3]) + " " + str(g3[4]) + " " + str(g3[5]))
+        allvals = np.concatenate(foobar)
+
+        #print(str(self.iteration) + " " + str(states) + " " + str(actions) + " " + str(rewards))
+        print(' '.join(map(str, allvals)))
+        print(q1a)
+        print(nv)
+        print("future rewards " + str(q1b))
+        print(cdiff)
+        #print(str(g3[0]) + " " + str(g3[1]) + " " + str(g3[2]) + " " + str(g3[3]) + " " + str(g3[4]) + " " + str(g3[5]))
         self.s.run(self.update_all_targets)
 
         if self.summary_writer is not None and summary_str is not None:
@@ -331,8 +341,8 @@ class ContinuousDeepQ(object):
             newstates      = np.empty((len(samples), self.observation_size))
             actions        = np.zeros((len(samples), self.action_size))
 
-            newstates_mask = np.empty((len(samples),))
-            rewards        = np.empty((len(samples),))
+            newstates_mask = np.empty((len(samples),1))
+            rewards        = np.empty((len(samples),1))
 
             for i, (state, action, reward, newstate) in enumerate(samples):
                 states[i] = state
@@ -345,6 +355,7 @@ class ContinuousDeepQ(object):
                     newstates[i] = 0
                     newstates_mask[i] = 0.
 
+            print("reward: " + str(rewards))
             self.run_learn(states, newstates, newstates_mask, actions, rewards)
 
             if self.iteration % 10000 == 0:

@@ -129,9 +129,9 @@ def do_rl():
     actor = SimpleActorMLP("actor")
 
     #optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001, decay=0.9)
-    optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.001)
+    optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.002)
     #critic_optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001, decay=0.9)
-    critic_optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.001)
+    critic_optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.002)
 
     timestr = time.strftime("-%H%M%S")
     writer = tf.train.SummaryWriter("/tmp/test_tb_logs/run" + timestr)
@@ -149,7 +149,7 @@ def do_rl():
     reward = 0.0
     new_observation = None
 
-    for i in range(10000):
+    for i in range(1000):
         new_observation = np.random.rand(1)  # Random input
         #new_observation = np.array([random.random()])
         if last_observation is not None:
