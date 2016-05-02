@@ -5,7 +5,7 @@ from .utils import base_name
 
 
 class Layer(object):
-    def __init__(self, input_sizes, output_size, scope):
+    def __init__(self, input_sizes, output_size, scope, is_last):
         """Cretes a neural network layer."""
         if type(input_sizes) != list:
             input_sizes = [input_sizes]
@@ -13,13 +13,18 @@ class Layer(object):
         self.input_sizes = input_sizes
         self.output_size = output_size
         self.scope       = scope or "Layer"
+        self.is_last = is_last
 
         with tf.variable_scope(self.scope):
             self.Ws = []
             for input_idx, input_size in enumerate(input_sizes):
                 W_name = "W_%d" % (input_idx,)
-                W_initializer =  tf.random_uniform_initializer(
+                if is_last:
+                    W_initializer =  tf.random_uniform_initializer(-0.003, 0.003)
+                else:
+                    W_initializer =  tf.random_uniform_initializer(
                         -1.0 / math.sqrt(input_size), 1.0 / math.sqrt(input_size))
+
                 W_var = tf.get_variable(W_name, (input_size, output_size), initializer=W_initializer)
                 self.Ws.append(W_var)
             self.b = tf.get_variable("b", (output_size,), initializer=tf.constant_initializer(0))
@@ -43,7 +48,7 @@ class Layer(object):
                 tf.get_variable(base_name(v), v.get_shape(),
                         initializer=lambda x,dtype=tf.float32: v.initialized_value())
             sc.reuse_variables()
-            return Layer(self.input_sizes, self.output_size, scope=sc)
+            return Layer(self.input_sizes, self.output_size, scope=sc, is_last=self.is_last)
 
 class MLP(object):
     def __init__(self, input_sizes, hiddens, nonlinearities, scope=None, given_layers=None):
@@ -60,11 +65,11 @@ class MLP(object):
                 self.input_layer = given_layers[0]
                 self.layers      = given_layers[1:]
             else:
-                self.input_layer = Layer(input_sizes, hiddens[0], scope="input_layer")
+                self.input_layer = Layer(input_sizes, hiddens[0], scope="input_layer", is_last=False)
                 self.layers = []
 
                 for l_idx, (h_from, h_to) in enumerate(zip(hiddens[:-1], hiddens[1:])):
-                    self.layers.append(Layer(h_from, h_to, scope="hidden_layer_%d" % (l_idx,)))
+                    self.layers.append(Layer(h_from, h_to, scope="hidden_layer_%d" % (l_idx,), is_last=l_idx == len(hiddens)-1))
 
     def __call__(self, xs):
         if type(xs) != list:
