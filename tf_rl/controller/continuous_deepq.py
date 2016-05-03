@@ -14,9 +14,9 @@ class ContinuousDeepQ(object):
                        session,
                        exploration_sigma=0.15,
                        exploration_period=1000000,
-                       store_every_nth=2,
+                       store_every_nth=1,
                        train_every_nth=2,
-                       minibatch_size=32,
+                       minibatch_size=64,
                        discount_rate=0.95,
                        max_experience=30000,
                        target_actor_update_rate=0.001,
@@ -192,6 +192,8 @@ class ContinuousDeepQ(object):
             self.value_given_action         = self.critic([self.observation, self.given_action])
             tmp_diff = self.value_given_action - self.future_reward
             self.critic_error               = tf.reduce_mean(tf.square(tmp_diff))
+            l2loss = tf.add_n([tf.nn.l2_loss(x) for x in self.critic.variables()])
+            self.critic_error += 0.01 * l2loss
 
             ##### OPTIMIZATION #####
             self.critic_gradients                       = self.critic_optimizer.compute_gradients(self.critic_error, var_list=self.critic.variables(), gate_gradients=2)
@@ -271,6 +273,9 @@ class ContinuousDeepQ(object):
                 self.experience.popleft()
         self.number_of_times_store_called += 1
 
+    def do_target_update(self):
+        self.s.run(self.update_all_targets)
+
     def run_learn(self, states, newstates, newstates_mask, actions, rewards):
         to_fetch = [
             self.critic_update,
@@ -286,7 +291,8 @@ class ContinuousDeepQ(object):
             self.rewards:                rewards,
         })
 
-        self.s.run(self.update_all_targets)
+        #self.s.run(self.update_all_targets)
+        self.do_target_update()
 
         if self.summary_writer is not None and summary_str is not None:
             self.summary_writer.add_summary(summary_str, self.iteration)
