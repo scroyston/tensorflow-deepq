@@ -1,6 +1,7 @@
 import numpy as np
 import random
 import tensorflow as tf
+import time
 
 from collections import deque
 
@@ -15,7 +16,7 @@ class ContinuousDeepQ(object):
                        exploration_sigma=0.15,
                        exploration_period=1000000,
                        store_every_nth=1,
-                       train_every_nth=2,
+                       train_every_nth=1,
                        minibatch_size=64,
                        discount_rate=0.95,
                        max_experience=30000,
@@ -173,12 +174,12 @@ class ContinuousDeepQ(object):
             self.next_observation          = tf.placeholder(tf.float32, [None, self.observation_size], name="next_observation")
             self.next_observation_mask     = tf.placeholder(tf.float32, [None,1], name="next_observation_mask")
             self.rewards                   = tf.placeholder(tf.float32, [None,1], name="rewards")
-            tf.histogram_summary("reward", self.rewards)
+            #tf.histogram_summary("reward", self.rewards)
 
         # FOR REGULAR ACTION SCORE COMPUTATION
         with tf.name_scope("taking_action"):
             self.actor_action = tf.identity(self.actor(self.observation), name="actor_action")
-            tf.histogram_summary("actions", self.actor_action)
+            #tf.histogram_summary("actions", self.actor_action)
 
         with tf.name_scope("critic_update"):
             # FOR PREDICTING TARGET FUTURE REWARDS
@@ -186,46 +187,50 @@ class ContinuousDeepQ(object):
             self.next_value                = self.target_critic([self.next_observation, self.next_action]) # ST
             self.future_reward             = self.rewards + self.discount_rate *  self.next_observation_mask * self.next_value
 
-            tf.histogram_summary("target_actions", self.next_action)
+            #tf.histogram_summary("target_actions", self.next_action)
 
             ##### ERROR FUNCTION #####
             self.value_given_action         = self.critic([self.observation, self.given_action])
             tmp_diff = self.value_given_action - self.future_reward
             self.critic_error               = tf.reduce_mean(tf.square(tmp_diff))
-            l2loss = tf.add_n([tf.nn.l2_loss(x) for x in self.critic.variables()])
-            self.critic_error += 0.01 * l2loss
+            #l2loss = tf.add_n([tf.nn.l2_loss(x) for x in self.critic.variables()])
+            #self.critic_error += 0.01 * l2loss
 
             ##### OPTIMIZATION #####
-            self.critic_gradients                       = self.critic_optimizer.compute_gradients(self.critic_error, var_list=self.critic.variables(), gate_gradients=2)
+            #self.critic_gradients = self.critic_optimizer.compute_gradients(self.critic_error, var_list=self.critic.variables())
 
             # Add histograms for gradients.
-            for grad, var in self.critic_gradients:
-                tf.histogram_summary('critic_update/' + var.name, var)
-                if grad:
-                    tf.histogram_summary('critic_update/' + var.name + '/gradients', grad)
+            #for grad, var in self.critic_gradients:
+                #tf.histogram_summary('critic_update/' + var.name, var)
+                #if grad:
+                    #tf.histogram_summary('critic_update/' + var.name + '/gradients', grad)
 
-            self.critic_update              = self.critic_optimizer.apply_gradients(self.critic_gradients)
-            tf.scalar_summary("critic_error", self.critic_error)
+            #self.critic_update              = self.critic_optimizer.apply_gradients(self.critic_gradients)
+            self.critic_update              = self.critic_optimizer.minimize(self.critic_error, var_list=self.critic.variables())
+            #tf.scalar_summary("critic_error", self.critic_error)
 
         with tf.name_scope("actor_update"):
-            with tf.control_dependencies([self.critic_update]):
+            self.actor_score = self.critic([self.observation, self.actor_action])
+            #with tf.control_dependencies([self.critic_update]):
                 ##### ERROR FUNCTION #####
-                self.actor_score = self.critic([self.observation, self.actor_action])
-                tf.histogram_summary("critic_score", self.actor_score)
+                #self.actor_score = self.critic([self.observation, self.actor_action])
+                #tf.histogram_summary("critic_score", self.actor_score)
 
             ##### OPTIMIZATION #####
             # here we are maximizing actor score.
             # only optimize actor variables here, while keeping critic constant
-            with tf.control_dependencies([self.actor_score]):
-                actor_gradients = self.actor_optimizer.compute_gradients(tf.reduce_mean(-self.actor_score), var_list=self.critic.variables() + self.actor.variables(), gate_gradients=2)
+            #with tf.control_dependencies([self.actor_score]):
+                #actor_gradients = self.actor_optimizer.compute_gradients(tf.reduce_mean(-self.actor_score), var_list=self.actor.variables())
+                #actor_gradients = self.actor_optimizer.compute_gradients(tf.reduce_mean(-self.actor_score), var_list=self.critic.variables() + self.actor.variables())
 
             # Add histograms for gradients.
-            for grad, var in actor_gradients:
-                tf.histogram_summary('actor_update/' + var.name, var)
-                if grad:
-                    tf.histogram_summary('actor_update/' + var.name + '/gradients', grad)
+            #for grad, var in actor_gradients:
+                #tf.histogram_summary('actor_update/' + var.name, var)
+                #if grad:
+                    #tf.histogram_summary('actor_update/' + var.name + '/gradients', grad)
 
-            self.actor_update              = self.actor_optimizer.apply_gradients([ x for x in actor_gradients if x[1] in self.actor.variables()])
+            #self.actor_update              = self.actor_optimizer.apply_gradients([ x for x in actor_gradients if x[1] in self.actor.variables()])
+            self.actor_update              = self.actor_optimizer.minimize(tf.reduce_mean(-self.actor_score), var_list=self.actor.variables())
 
         # UPDATE TARGET NETWORK
         with tf.name_scope("target_network_update"):
@@ -251,7 +256,11 @@ class ContinuousDeepQ(object):
                                                        1.0,
                                                        self.exploration_sigma)
 
+        start_time = time.perf_counter()
         action = self.s.run(self.actor_action, {self.observation: observation[np.newaxis,:]})[0]
+        end_time = time.perf_counter()
+        print("action time: " + str(end_time-start_time))
+
         if not disable_exploration and random.random() > 0.7:
             action += np.random.normal(0, noise_sigma, size=action.shape)
             #action += np.random.normal(0, 1.0, size=action.shape)
@@ -273,8 +282,31 @@ class ContinuousDeepQ(object):
                 self.experience.popleft()
         self.number_of_times_store_called += 1
 
-    def do_target_update(self):
+    def run_learn2(self, states, newstates, newstates_mask, actions, rewards):
+        start = time.perf_counter()
+        self.s.run([self.critic_update], {
+            self.observation:            states,
+            self.next_observation:       newstates,
+            self.next_observation_mask:  newstates_mask,
+            self.given_action:           actions,
+            self.rewards:                rewards,
+        })
+        stop = time.perf_counter()
+
+        print("elapsed: " + str(stop - start))
+
+        start = time.perf_counter()
+        self.s.run([self.actor_update], {
+            self.observation:            states
+        })
+        stop = time.perf_counter()
+
+        print("elapsed2: " + str(stop - start))
+
         self.s.run(self.update_all_targets)
+
+        self.iteration += 1
+
 
     def run_learn(self, states, newstates, newstates_mask, actions, rewards):
         to_fetch = [
@@ -283,6 +315,8 @@ class ContinuousDeepQ(object):
             self.summarize if self.iteration % 1000 == 0 else self.no_op1,
         ]
 
+        import time
+        start = time.perf_counter()
         _, _, summary_str = self.s.run(to_fetch, {
             self.observation:            states,
             self.next_observation:       newstates,
@@ -290,9 +324,10 @@ class ContinuousDeepQ(object):
             self.given_action:           actions,
             self.rewards:                rewards,
         })
+        stop = time.perf_counter()
 
-        #self.s.run(self.update_all_targets)
-        self.do_target_update()
+        print("elapsed: " + str(stop - start))
+        self.s.run(self.update_all_targets)
 
         if self.summary_writer is not None and summary_str is not None:
             self.summary_writer.add_summary(summary_str, self.iteration)
@@ -313,12 +348,12 @@ class ContinuousDeepQ(object):
             samples   = [self.experience[i] for i in samples]
 
             # bach states
-            states         = np.empty((len(samples), self.observation_size))
-            newstates      = np.empty((len(samples), self.observation_size))
-            actions        = np.zeros((len(samples), self.action_size))
+            states         = np.empty((len(samples), self.observation_size), dtype=np.float32)
+            newstates      = np.empty((len(samples), self.observation_size), dtype=np.float32)
+            actions        = np.zeros((len(samples), self.action_size), dtype=np.float32)
 
-            newstates_mask = np.empty((len(samples),1))
-            rewards        = np.empty((len(samples),1))
+            newstates_mask = np.empty((len(samples),1), dtype=np.float32)
+            rewards        = np.empty((len(samples),1), dtype=np.float32)
 
             for i, (state, action, reward, newstate) in enumerate(samples):
                 states[i] = state
@@ -331,7 +366,7 @@ class ContinuousDeepQ(object):
                     newstates[i] = 0
                     newstates_mask[i] = 0.
 
-            self.run_learn(states, newstates, newstates_mask, actions, rewards)
+            self.run_learn2(states, newstates, newstates_mask, actions, rewards)
 
         self.number_of_times_train_called += 1
 
