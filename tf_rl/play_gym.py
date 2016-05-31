@@ -20,13 +20,17 @@ def run_cartpole():
 
     tf.reset_default_graph()
     #session = tf.InteractiveSession()
-    session = tf.Session()
+    config_proto = tf.ConfigProto()
+    config_proto.intra_op_parallelism_threads = 1
+    config_proto.inter_op_parallelism_threads = 1
+
+    session = tf.Session(config=config_proto)
 
     #actor = mdls.MLP([observation_size, ], [400, 300, action_size], [tf.nn.relu, tf.nn.relu, tf.tanh], scope="actor")
     #critic = mdls.MLP([observation_size, action_size], [400, 300, 1], [tf.nn.relu, tf.nn.relu, tf.identity], scope="critic")
 
-    actor = mdls.MLP([observation_size, ], [64, 64, action_size], [tf.nn.relu, tf.nn.relu, tf.tanh], scope="actor")
-    critic = mdls.MLP([observation_size, action_size], [64, 64, 1], [tf.nn.relu, tf.nn.relu, tf.identity], scope="critic")
+    actor = mdls.MLP([observation_size, ], [64, 64, 64, action_size], [tf.nn.relu, tf.nn.relu, tf.nn.relu, tf.tanh], scope="actor")
+    critic = mdls.MLP([observation_size, action_size], [64, 64, 64, 1], [tf.nn.relu, tf.nn.relu, tf.nn.relu, tf.identity], scope="critic")
 
     #optimizer = tf.train.RMSPropOptimizer(learning_rate=0.001, decay=0.9)
     optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
@@ -37,18 +41,18 @@ def run_cartpole():
     writer = tf.train.SummaryWriter("/tmp/test_tb_logs/run" + timestr)
 
     contDeepQ = ContinuousDeepQ(observation_size, action_size, actor, critic, optimizer, critic_optimizer, session,
-                                minibatch_size=32, discount_rate=0.99, max_experience=1000, summary_writer=writer)
+                                minibatch_size=64, discount_rate=0.99, max_experience=10000, summary_writer=writer)
 
     session.run(tf.initialize_all_variables())
     contDeepQ.startup()
 
     writer.add_graph(session.graph_def)
 
-    #env.monitor.start('/tmp/pendulum-experiment/run_' + timestr)
+    env.monitor.start('/tmp/pendulum-experiment/run_' + timestr)
     for i in range(1500):
         run_epoch(contDeepQ, env)
 
-    #env.monitor.close()
+    env.monitor.close()
 
 
 def run_epoch(contDeepQ, env):

@@ -190,11 +190,11 @@ class ContinuousDeepQ(object):
             #tf.histogram_summary("target_actions", self.next_action)
 
             ##### ERROR FUNCTION #####
-            self.value_given_action         = self.critic([self.observation, self.given_action])
+            self.value_given_action         = self.critic([self.observation, self.given_action], tf.constant(0.5))
             tmp_diff = self.value_given_action - self.future_reward
             self.critic_error               = tf.reduce_mean(tf.square(tmp_diff))
-            #l2loss = tf.add_n([tf.nn.l2_loss(x) for x in self.critic.variables()])
-            #self.critic_error += 0.01 * l2loss
+            l2loss = tf.add_n([tf.nn.l2_loss(x) for x in self.critic.variables()])
+            self.critic_error += 0.01 * l2loss
 
             ##### OPTIMIZATION #####
             #self.critic_gradients = self.critic_optimizer.compute_gradients(self.critic_error, var_list=self.critic.variables())
@@ -210,10 +210,10 @@ class ContinuousDeepQ(object):
             #tf.scalar_summary("critic_error", self.critic_error)
 
         with tf.name_scope("actor_update"):
-            self.actor_score = self.critic([self.observation, self.actor_action])
-            #with tf.control_dependencies([self.critic_update]):
+            with tf.control_dependencies([self.critic_update]):
                 ##### ERROR FUNCTION #####
-                #self.actor_score = self.critic([self.observation, self.actor_action])
+                actor_action_learn = tf.identity(self.actor(self.observation, tf.constant(0.5)), name="actor_action")
+                self.actor_score = self.critic([self.observation, actor_action_learn])
                 #tf.histogram_summary("critic_score", self.actor_score)
 
             ##### OPTIMIZATION #####
@@ -255,11 +255,7 @@ class ContinuousDeepQ(object):
                                                        self.exploration_period,
                                                        1.0,
                                                        self.exploration_sigma)
-
-        start_time = time.perf_counter()
         action = self.s.run(self.actor_action, {self.observation: observation[np.newaxis,:]})[0]
-        end_time = time.perf_counter()
-        print("action time: " + str(end_time-start_time))
 
         if not disable_exploration and random.random() > 0.7:
             action += np.random.normal(0, noise_sigma, size=action.shape)
@@ -282,42 +278,18 @@ class ContinuousDeepQ(object):
                 self.experience.popleft()
         self.number_of_times_store_called += 1
 
-    def run_learn2(self, states, newstates, newstates_mask, actions, rewards):
-        start = time.perf_counter()
-        self.s.run([self.critic_update], {
-            self.observation:            states,
-            self.next_observation:       newstates,
-            self.next_observation_mask:  newstates_mask,
-            self.given_action:           actions,
-            self.rewards:                rewards,
-        })
-        stop = time.perf_counter()
-
-        print("elapsed: " + str(stop - start))
-
-        start = time.perf_counter()
-        self.s.run([self.actor_update], {
-            self.observation:            states
-        })
-        stop = time.perf_counter()
-
-        print("elapsed2: " + str(stop - start))
-
-        self.s.run(self.update_all_targets)
-
-        self.iteration += 1
-
 
     def run_learn(self, states, newstates, newstates_mask, actions, rewards):
         to_fetch = [
             self.critic_update,
             self.actor_update,
-            self.summarize if self.iteration % 1000 == 0 else self.no_op1,
+            #self.summarize if self.iteration % 1000 == 0 else self.no_op1,
         ]
 
         import time
         start = time.perf_counter()
-        _, _, summary_str = self.s.run(to_fetch, {
+        #_, _, summary_str = self.s.run(to_fetch, {
+        _, _ = self.s.run(to_fetch, {
             self.observation:            states,
             self.next_observation:       newstates,
             self.next_observation_mask:  newstates_mask,
@@ -326,11 +298,10 @@ class ContinuousDeepQ(object):
         })
         stop = time.perf_counter()
 
-        print("elapsed: " + str(stop - start))
         self.s.run(self.update_all_targets)
 
-        if self.summary_writer is not None and summary_str is not None:
-            self.summary_writer.add_summary(summary_str, self.iteration)
+        #if self.summary_writer is not None and summary_str is not None:
+        #    self.summary_writer.add_summary(summary_str, self.iteration)
 
         self.iteration += 1
 
@@ -366,7 +337,7 @@ class ContinuousDeepQ(object):
                     newstates[i] = 0
                     newstates_mask[i] = 0.
 
-            self.run_learn2(states, newstates, newstates_mask, actions, rewards)
+            self.run_learn(states, newstates, newstates_mask, actions, rewards)
 
         self.number_of_times_train_called += 1
 

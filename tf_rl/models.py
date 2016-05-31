@@ -35,7 +35,10 @@ class Layer(object):
         assert len(xs) == len(self.Ws), \
                 "Expected %d input vectors, got %d" % (len(self.Ws), len(xs))
         with tf.variable_scope(self.scope):
-            return sum([tf.matmul(x, W) for x, W in zip(xs, self.Ws)]) + self.b
+            if len(xs) == 1:
+                return tf.matmul(xs[0], self.Ws[0]) + self.b
+            else:
+                return sum([tf.matmul(x, W) for x, W in zip(xs, self.Ws)]) + self.b
 
     def variables(self):
         return [self.b] + self.Ws
@@ -71,11 +74,13 @@ class MLP(object):
                 for l_idx, (h_from, h_to) in enumerate(zip(hiddens[:-1], hiddens[1:])):
                     self.layers.append(Layer(h_from, h_to, scope="hidden_layer_%d" % (l_idx,), is_last=l_idx == len(hiddens)-1))
 
-    def __call__(self, xs):
+    def __call__(self, xs, keep_prob=None):
+        if keep_prob is None:
+            keep_prob = tf.constant(1.0)
         if type(xs) != list:
             xs = [xs]
         with tf.variable_scope(self.scope):
-            hidden = self.input_nonlinearity(self.input_layer(xs))
+            hidden = tf.nn.dropout(self.input_nonlinearity(self.input_layer(xs)), keep_prob)
             for layer, nonlinearity in zip(self.layers, self.layer_nonlinearities):
                 hidden = nonlinearity(layer(hidden))
             return hidden
